@@ -1,0 +1,231 @@
+#!/usr/bin/env perl
+
+use 5.034;
+use warnings;
+use experimental qw(signatures);
+use HTTP::Tiny;
+use JSON::MaybeXS;
+use Hash::Util qw(lock_hashref_recurse);
+use Data::Dumper;
+
+### scoring
+
+# supercoach 2021
+my %sc2021_model = (
+  # batting
+  runs_multiplier => 1,
+
+  strike_rate_bonus_thresholds => [
+    [160, 25],
+    [150, 20],
+    [140, 15],
+    [130, 10],
+    [120, 5 ],
+  ],
+  strike_rate_bonus_cutoff => 20,
+
+  runs_bonus_thresholds => [
+    [100, 20],
+    [50,  10],
+  ],
+
+
+  # bowling
+  wickets_multiplier => 20,
+
+  wickets_bonus_multipler => [
+    [3, 10],
+  ],
+
+  maidens_multipler => 15,
+
+  dots_multipler => 1,
+
+  extras_multiplier => -1,
+
+  econ_rate_bonus_thresholds => [
+    [4, 25],
+    [5, 20],
+    [6, 15],
+    [7, 10],
+    [8, 5 ],
+  ],
+  econ_rate_bonus_cutoff => 3,
+
+
+  # fielding
+  catches_multiplier => 10,
+  runout_multiplier => 20,
+  stumping_multiplier => 15,
+);
+
+my $model = \%sc2021_model;
+lock_hashref_recurse($model);
+
+
+my ($match_id) = @ARGV;
+unless ($match_id) {
+  die "usage: $0 <match-id>\n";
+}
+
+my $ua = HTTP::Tiny->new;
+
+my $scorecard_data = do {
+  my ($res) = $ua->get("https://hs-consumer-api.espncricinfo.com/v1/pages/match/scorecard?lang=en&seriesId=1&matchId=$match_id");
+  unless ($res->{success}) {
+    die "E: couldn't get scorecard: $res->{status} $res->{reason}\n";
+  }
+  my $data = decode_json($res->{content});
+  lock_hashref_recurse($data);
+};
+
+my $over_data = do {
+  my ($res) = $ua->get("https://hs-consumer-api.espncricinfo.com/v1/pages/match/overs/details?lang=en&seriesId=1&matchId=$match_id&mode=ALL");
+  unless ($res->{success}) {
+    die "E: couldn't get overs $res->{status} $res->{reason}\n";
+  }
+  my $data = decode_json($res->{content});
+  lock_hashref_recurse($data);
+};
+
+my %players;
+
+# batting
+my @batting_cards = 
+  map { $_->{inningBatsmen}->@* }
+  $scorecard_data->{content}{scorecard}{innings}->@*;
+
+for my $card (@batting_cards) {
+  # initial player setup from batting card
+  my $player = $players{$card->{player}{id}} //= {
+    info  => $card->{player},
+    score => 0,
+  };
+
+  next unless $card->{battedType} eq 'yes';
+
+  my $runs_score        = $card->{runs} * $model->{runs_multiplier};
+  my $strike_rate_bonus =
+    $card->{runs} >= $model->{strike_rate_bonus_cutoff} ?
+      threshold_bonus($card->{strikerate}, $model->{strike_rate_bonus_thresholds}) : 0;
+  my $runs_bonus        = threshold_bonus($card->{runs}, $model->{runs_bonus_thresholds});
+
+  $player->{score} += $runs_score + $strike_rate_bonus + $runs_bonus;
+
+  say "BAT $player->{info}{name}: RS $runs_score SRB $strike_rate_bonus RB $runs_bonus";
+}
+
+# bowling
+my @bowling_cards = 
+  map { $_->{inningBowlers}->@* }
+  $scorecard_data->{content}{scorecard}{innings}->@*;
+
+for my $card (@bowling_cards) {
+  # initial player setup from bowling card
+  # again? yes. what if subs or something?
+  my $player = $players{$card->{player}{id}} //= {
+    info  => $card->{player},
+    score => 0,
+  };
+
+  my $wickets_score   = $card->{wickets} * $model->{wickets_multiplier};
+  my $wickets_bonus   = threshold_bonus($card->{wickets}, $model->{wickets_bonus_multipler});
+  my $maidens_score   = $card->{maidens} * $model->{maidens_multipler};
+  my $dots_score      = $card->{dots} * $model->{dots_multipler};
+  my $extras_score    = ($card->{wides} + $card->{noballs}) * $model->{extras_multiplier};
+  my $econ_rate_bonus =
+    $card->{overs} >= $model->{econ_rate_bonus_cutoff} ?
+      threshold_bonus($card->{economy}, $model->{econ_rate_bonus_thresholds}, 1) : 0;
+
+  $player->{score} += $wickets_score + $wickets_bonus + $maidens_score + $dots_score + $extras_score + $econ_rate_bonus;
+
+  say "BWL $player->{info}{name}: WS $wickets_score WB $wickets_bonus MS $maidens_score DS $dots_score ES $extras_score ERB $econ_rate_bonus";
+}
+
+# bowling, leg byes and byes
+
+# SC penalises the bowler for these, whereas a standard scorecard doesn't even
+# record them against the bowler. so we have to examine each over and look for
+# the leg byes and byes directly
+
+my @balls = 
+  map { $_->{balls}->@* }
+  map { $_->{stats}->@* }
+  $over_data->{inningOvers}->@*;
+
+for my $ball (@balls) {
+  next unless $ball->{byes} || $ball->{legbyes};
+
+  my $player = $players{$ball->{bowlerPlayerId}};
+
+  my $extras_score = ($ball->{byes} + $ball->{legbyes}) * $model->{extras_multiplier};
+
+  $player->{score} += $extras_score;
+
+  say "BYE $player->{info}{name} ES $extras_score";
+}
+
+# fielding
+for my $card (@batting_cards) {
+  # already initialised from batting card
+  my $player = $players{$card->{player}{id}};
+
+  next unless $card->{dismissalType};
+
+  # 1 caught
+  # 2 bowled
+  # 3 lbw
+  # 4 run out
+  # 5 stumped
+  # 6 hit wicket
+  # 7-11 ?
+  # 12 not out
+
+  if ($card->{dismissalType} == 1) {
+    # caught
+    my $fielder = $card->{dismissalFielders}->[0];
+    next if $fielder->{isSubstitute};
+    $fielder = $fielder->{player};
+
+    $players{$fielder->{id}}->{score} += $model->{catches_multiplier};
+    say "FLD $fielder->{name} C +$model->{catches_multiplier}";
+  }
+
+  elsif ($card->{dismissalType} == 4) {
+    # run out
+    # XXX multiple (relay)?
+    my $fielder = $card->{dismissalFielders}->[0];
+    next if $fielder->{isSubstitute};
+    $fielder = $fielder->{player};
+
+    $players{$fielder->{id}}->{score} += $model->{runout_multiplier};
+    say "FLD $fielder->{name} R +$model->{runout_multiplier}";
+  }
+
+  elsif ($card->{dismissalType} == 5) {
+    # stumped
+    my $fielder = $card->{dismissalFielders}->[0];
+    next if $fielder->{isSubstitute};
+    $fielder = $fielder->{player};
+
+    $players{$fielder->{id}}->{score} += $model->{stumping_multiplier};
+    say "FLD $fielder->{name} S +$model->{stumping_multiplier}";
+  }
+}
+
+for my $player (sort { $b->{score} <=> $a->{score} } values %players) {
+  say "$player->{info}{name}: $player->{score}";
+};
+
+sub threshold_bonus ($v, $thresholds, $neg = 0) {
+  for my $pair (@$thresholds) {
+    my ($t, $b) = @$pair;
+    if ($neg) {
+      return $b if $v <= $t;
+    }
+    else {
+      return $b if $v >= $t;
+    }
+  }
+  return 0;
+}
