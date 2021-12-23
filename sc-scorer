@@ -65,7 +65,77 @@ my %sc2021_model = (
   first_innings_multiplier => 1,
 );
 
-my $model = \%sc2021_model;
+# tests
+my %test_model = (
+  # batting
+  runs_multiplier => 1,
+
+  strike_rate_bonus_thresholds => [
+    [100, 30],
+    [ 90, 25],
+    [ 80, 20],
+    [ 70, 15],
+    [ 60, 10],
+    [ 50, 5 ],
+  ],
+  strike_rate_bonus_cutoff => 30,
+
+  runs_bonus_thresholds => [
+    [250, 50],
+    [200, 40],
+    [150, 30],
+    [100, 20],
+    [50,  10],
+  ],
+
+  balls_bonus_thresholds => [
+    [500, 100],
+    [450,  90],
+    [400,  80],
+    [350,  70],
+    [300,  60],
+    [250,  50],
+    [200,  40],
+    [150,  30],
+    [100,  20],
+    [ 50,  10],
+  ],
+
+
+  # bowling
+  wickets_multiplier => 30,
+
+  wickets_bonus_multipler => [
+    [3, 10],
+    [5, 20],
+  ],
+
+  maidens_multipler => 2,
+
+  dots_multipler => 0,
+
+  extras_multiplier => -1,
+
+  econ_rate_bonus_thresholds => [
+    [1, 25],
+    [2, 20],
+    [3, 15],
+    [4, 10],
+  ],
+  econ_rate_bonus_cutoff => 5,
+
+
+  # fielding
+  catches_multiplier => 10,
+  runout_multiplier => 20,
+  stumping_multiplier => 15,
+
+
+  # first innings bonus
+  first_innings_multiplier => 1,
+);
+
+my $model = \%test_model;
 lock_hashref_recurse($model);
 
 
