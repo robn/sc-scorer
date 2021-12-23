@@ -29,6 +29,8 @@ my %sc2021_model = (
     [50,  10],
   ],
 
+  balls_bonus_thresholds => [],
+
 
   # bowling
   wickets_multiplier => 20,
@@ -122,10 +124,11 @@ for my $card (@batting_cards) {
     $card->{runs} >= $model->{strike_rate_bonus_cutoff} ?
       threshold_bonus($card->{strikerate}, $model->{strike_rate_bonus_thresholds}) : 0;
   my $runs_bonus        = threshold_bonus($card->{runs}, $model->{runs_bonus_thresholds});
+  my $balls_bonus       = threshold_bonus($card->{balls}, $model->{balls_bonus_thresholds});
 
   my $innings_multiplier = $card->{inningNumber} < 3 ? $model->{first_innings_multiplier} : 1;
 
-  $player->{score} += ($runs_score + $strike_rate_bonus + $runs_bonus) * $innings_multiplier;
+  $player->{score} += ($runs_score + $strike_rate_bonus + $runs_bonus + $balls_bonus) * $innings_multiplier;
 
   say "BAT $card->{inningNumber} $player->{info}{name}: RS $runs_score SRB $strike_rate_bonus RB $runs_bonus";
 }
