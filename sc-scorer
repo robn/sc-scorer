@@ -57,6 +57,10 @@ my %sc2021_model = (
   catches_multiplier => 10,
   runout_multiplier => 20,
   stumping_multiplier => 15,
+
+
+  # first innings bonus
+  first_innings_multiplier => 1,
 );
 
 my $model = \%sc2021_model;
@@ -119,7 +123,9 @@ for my $card (@batting_cards) {
       threshold_bonus($card->{strikerate}, $model->{strike_rate_bonus_thresholds}) : 0;
   my $runs_bonus        = threshold_bonus($card->{runs}, $model->{runs_bonus_thresholds});
 
-  $player->{score} += $runs_score + $strike_rate_bonus + $runs_bonus;
+  my $innings_multiplier = $card->{inningNumber} < 3 ? $model->{first_innings_multiplier} : 1;
+
+  $player->{score} += ($runs_score + $strike_rate_bonus + $runs_bonus) * $innings_multiplier;
 
   say "BAT $card->{inningNumber} $player->{info}{name}: RS $runs_score SRB $strike_rate_bonus RB $runs_bonus";
 }
@@ -157,7 +163,9 @@ for my $card (@bowling_cards) {
     $card->{overs} >= $model->{econ_rate_bonus_cutoff} ?
       threshold_bonus($card->{economy}, $model->{econ_rate_bonus_thresholds}, 1) : 0;
 
-  $player->{score} += $wickets_score + $wickets_bonus + $maidens_score + $dots_score + $extras_score + $econ_rate_bonus;
+  my $innings_multiplier = $card->{inningNumber} < 3 ? $model->{first_innings_multiplier} : 1;
+
+  $player->{score} += ($wickets_score + $wickets_bonus + $maidens_score + $dots_score + $extras_score + $econ_rate_bonus) * $innings_multiplier;
 
   say "BWL $card->{inningNumber} $player->{info}{name}: WS $wickets_score WB $wickets_bonus MS $maidens_score DS $dots_score ES $extras_score ERB $econ_rate_bonus";
 }
