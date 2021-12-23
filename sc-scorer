@@ -92,7 +92,16 @@ my %players;
 
 # batting
 my @batting_cards = 
-  map { $_->{inningBatsmen}->@* }
+  map {
+    my $inn = $_->{inningNumber};
+    map {
+      {
+        inningNumber => $inn,
+        %$_,
+      }
+    }
+    $_->{inningBatsmen}->@*
+  }
   $scorecard_data->{content}{scorecard}{innings}->@*;
 
 for my $card (@batting_cards) {
@@ -112,12 +121,23 @@ for my $card (@batting_cards) {
 
   $player->{score} += $runs_score + $strike_rate_bonus + $runs_bonus;
 
-  say "BAT $player->{info}{name}: RS $runs_score SRB $strike_rate_bonus RB $runs_bonus";
+  say "BAT $card->{inningNumber} $player->{info}{name}: RS $runs_score SRB $strike_rate_bonus RB $runs_bonus";
 }
+
+say "";
 
 # bowling
 my @bowling_cards = 
-  map { $_->{inningBowlers}->@* }
+  map {
+    my $inn = $_->{inningNumber};
+    map {
+      {
+        inningNumber => $inn,
+        %$_,
+      }
+    }
+    $_->{inningBowlers}->@*
+  }
   $scorecard_data->{content}{scorecard}{innings}->@*;
 
 for my $card (@bowling_cards) {
@@ -139,8 +159,10 @@ for my $card (@bowling_cards) {
 
   $player->{score} += $wickets_score + $wickets_bonus + $maidens_score + $dots_score + $extras_score + $econ_rate_bonus;
 
-  say "BWL $player->{info}{name}: WS $wickets_score WB $wickets_bonus MS $maidens_score DS $dots_score ES $extras_score ERB $econ_rate_bonus";
+  say "BWL $card->{inningNumber} $player->{info}{name}: WS $wickets_score WB $wickets_bonus MS $maidens_score DS $dots_score ES $extras_score ERB $econ_rate_bonus";
 }
+
+say "";
 
 # bowling, leg byes and byes
 
@@ -162,14 +184,13 @@ for my $ball (@balls) {
 
   $player->{score} += $extras_score;
 
-  say "BYE $player->{info}{name} ES $extras_score";
+  say "BYE $ball->{inningNumber} $player->{info}{name}: ES $extras_score";
 }
+
+say "";
 
 # fielding
 for my $card (@batting_cards) {
-  # already initialised from batting card
-  my $player = $players{$card->{player}{id}};
-
   next unless $card->{dismissalType};
 
   # 1 caught
@@ -181,37 +202,23 @@ for my $card (@batting_cards) {
   # 7-11 ?
   # 12 not out
 
-  if ($card->{dismissalType} == 1) {
-    # caught
-    my $fielder = $card->{dismissalFielders}->[0];
-    next if $fielder->{isSubstitute};
-    $fielder = $fielder->{player};
+  my ($type, $mult) =
+    $card->{dismissalType} == 1 ? ('C', $model->{catches_multiplier}) :   # caught
+    $card->{dismissalType} == 4 ? ('R', $model->{runout_multiplier}) :    # run out
+    $card->{dismissalType} == 5 ? ('S', $model->{stumping_multiplier}) :  # stumped
+    ();
 
-    $players{$fielder->{id}}->{score} += $model->{catches_multiplier};
-    say "FLD $fielder->{name} C +$model->{catches_multiplier}";
-  }
+  next unless $type;
 
-  elsif ($card->{dismissalType} == 4) {
-    # run out
-    # XXX multiple (relay)?
-    my $fielder = $card->{dismissalFielders}->[0];
-    next if $fielder->{isSubstitute};
-    $fielder = $fielder->{player};
+  my $player = $card->{dismissalFielders}->[0];
+  next if $player->{isSubstitute};
+  $player = $player->{player};
 
-    $players{$fielder->{id}}->{score} += $model->{runout_multiplier};
-    say "FLD $fielder->{name} R +$model->{runout_multiplier}";
-  }
-
-  elsif ($card->{dismissalType} == 5) {
-    # stumped
-    my $fielder = $card->{dismissalFielders}->[0];
-    next if $fielder->{isSubstitute};
-    $fielder = $fielder->{player};
-
-    $players{$fielder->{id}}->{score} += $model->{stumping_multiplier};
-    say "FLD $fielder->{name} S +$model->{stumping_multiplier}";
-  }
+  $players{$player->{id}}->{score} += $mult;
+  say "FLD $card->{inningNumber} $player->{name}: $type +$mult";
 }
+
+say "";
 
 for my $player (sort { $b->{score} <=> $a->{score} } values %players) {
   say "$player->{info}{name}: $player->{score}";
