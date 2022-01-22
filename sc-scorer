@@ -164,6 +164,11 @@ my $over_data = do {
   lock_hashref_recurse($data);
 };
 
+if ($scorecard_data->{match}{state} eq 'PRE') {
+  say "Match hasn't started yet.";
+  exit 0;
+}
+
 my %players;
 
 # batting
